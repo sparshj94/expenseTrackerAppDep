@@ -1,0 +1,132 @@
+version: '3'
+
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.4
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - 2181:2181
+
+  kafka:
+    image: confluentinc/cp-kafka:7.4.4
+    depends_on:
+      - zookeeper
+    ports:
+      - 9092:9092
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
+  mysql:
+    image: mysql:8.3.0
+    container_name: mysql-8.3.0
+    restart: always
+    environment:
+      MYSQL_USER: test
+      MYSQL_ROOT_USER: root
+      MYSQL_PASSWORD: 'password'
+      MYSQL_ROOT_PASSWORD: 'password'
+    ports:
+      - '3306:3306'
+    expose:
+      - '3306'
+    volumes:
+      - mysql-db:/var/lib/mysql
+
+  userservice:
+    image: user-service
+    container_name: user-service
+    ports:
+      - '9810:9810'
+    environment:
+      KAFKA_HOST: kafka
+      KAFKA_PORT: 9092
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_DB: userservice
+    depends_on:
+      - kafka
+      - mysql
+      - authservice
+
+  expenseservice:
+    image: expense-service
+    container_name: expense-service
+    ports:
+      - '9820:9820'
+    environment:
+      KAFKA_HOST: kafka
+      KAFKA_PORT: 9092
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_DB: expenseservice
+    depends_on:
+      - kafka
+      - mysql
+
+
+  dsservice:
+    image: ds-service
+    container_name: ds-service
+    ports:
+      - '8010:8010'
+    environment:
+      KAFKA_HOST: kafka
+      KAFKA_PORT: 9092
+      OPENAI_API_KEY: UKihOuT5BV6sQl5YFOXlAvc03ns5d4nY
+    depends_on:
+      - kafka
+      - mysql
+      - expenseservice
+      - userservice
+
+  authservice:
+    image: auth-service
+    container_name: auth-service
+    environment:
+      KAFKA_HOST: kafka
+      KAFKA_PORT: 9092
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_DB: authservice
+    ports:
+      - '9898:9898'
+    depends_on:
+      - kafka
+      - mysql
+
+  kong-service:
+    image: kong
+    volumes:
+      - "./config:/usr/local/kong/declarative"
+      - "./custom-plugins:/usr/local/share/lua/5.1/kong/plugins"
+    environment:
+      KONG_DATABASE: off
+      KONG_DECLARATIVE_CONFIG: /usr/local/kong/declarative/kong-config.yml
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_LISTEN: 0.0.0.0:8001, 0.0.0.0:8444 ssl
+      KONG_LOG_LEVEL: debug
+      KONG_PLUGINS: "custom-auth"
+      KONG_LUA_PACKAGE_PATH: "/usr/local/share/lua/5.1/?.lua;;"
+    depends_on:
+      - authservice
+    ports:
+      - "8000:8000/tcp"
+      - "10.10.108.63:7990:8001/tcp"
+      - "8443:8443/tcp"
+      - "10.10.108.63:8444:8444/tcp"
+
+volumes:
+  mysql-db:
+    driver: local
+
