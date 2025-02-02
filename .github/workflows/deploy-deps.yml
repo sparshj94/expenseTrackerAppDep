@@ -1,0 +1,78 @@
+name: Deploy Microservices
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  AWS_REGION: ap-south-1
+
+jobs:
+  deploy-microservices:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Download infrastructure outputs from S3
+        env:
+          BUCKET_NAME: 'expensetrackerinfra'
+        run: |
+          aws s3 cp s3://$BUCKET_NAME/infrastructure-outputs.json infrastructure-outputs.json
+          cat infrastructure-outputs.json
+
+      - name: Set environment variables from JSON
+        id: set-env
+        run: |
+          export VPC_ID=$(jq -r '.[] | select(.OutputKey=="VpcId") | .OutputValue' infrastructure-outputs.json)
+          export PUBLIC_SUBNET_1=$(jq -r '.[] | select(.OutputKey=="PublicSubnetOne") | .OutputValue' infrastructure-outputs.json)
+          export PUBLIC_SUBNET_2=$(jq -r '.[] | select(.OutputKey=="PublicSubnetTwo") | .OutputValue' infrastructure-outputs.json)
+          export PRIVATE_SUBNET_1=$(jq -r '.[] | select(.OutputKey=="PrivateSubnetOne") | .OutputValue' infrastructure-outputs.json)
+          export PRIVATE_SUBNET_2=$(jq -r '.[] | select(.OutputKey=="PrivateSubnetTwo") | .OutputValue' infrastructure-outputs.json)
+          export PUBLIC_LOAD_BALANCER=$(jq -r '.[] | select(.OutputKey=="PublicLoadBalancer") | .OutputValue' infrastructure-outputs.json)
+          export PUBLIC_LOAD_BALANCER_SG=$(jq -r '.[] | select(.OutputKey=="PublicLoadBalancerSG") | .OutputValue' infrastructure-outputs.json)
+          export VPCCIDR=$(jq -r '.[] | select(.OutputKey=="VPCCIDR") | .OutputValue' infrastructure-outputs.json)
+          echo "VPC_ID=${VPC_ID}" >> $GITHUB_ENV
+          echo "PUBLIC_SUBNET_1=${PUBLIC_SUBNET_1}" >> $GITHUB_ENV
+          echo "PUBLIC_SUBNET_2=${PUBLIC_SUBNET_2}" >> $GITHUB_ENV
+          echo "PRIVATE_SUBNET_1=${PRIVATE_SUBNET_1}" >> $GITHUB_ENV
+          echo "PRIVATE_SUBNET_2=${PRIVATE_SUBNET_2}" >> $GITHUB_ENV
+          echo "ECS_CLUSTER_NAME=expense-tracker-services" >> $GITHUB_ENV
+          echo "PUBLIC_LOAD_BALANCER=${PUBLIC_LOAD_BALANCER}" >> $GITHUB_ENV
+          echo "PUBLIC_LOAD_BALANCER_SG=${PUBLIC_LOAD_BALANCER_SG}" >> $GITHUB_ENV
+          echo "VPCCIDR=${VPCCIDR}" >> $GITHUB_ENV
+
+      - name: Deploy Microservices Stack
+        run: |
+          aws cloudformation deploy \
+            --template-file cloudformation-template-deps.yaml \
+            --stack-name microservices-stack \
+            --parameter-overrides \
+              VPC=$VPC_ID \
+              VPCCIDR=$VPCCIDR \
+              PublicSubnets=$PUBLIC_SUBNET_1,$PUBLIC_SUBNET_2 \
+              PrivateSubnets=$PRIVATE_SUBNET_1,$PRIVATE_SUBNET_2 \
+              PublicLoadBalancer=$PUBLIC_LOAD_BALANCER \
+              PublicLoadBalancerSg=$PUBLIC_LOAD_BALANCER_SG \
+              ECSClusterName=$ECS_CLUSTER_NAME \
+              MySQLRootPassword=${{ secrets.MYSQL_ROOT_PASSWORD }} \
+              MySQLUser=${{ secrets.MYSQL_USER }} \
+              MySQLRootUser=${{ secrets.MYSQL_ROOT_USER }} \
+              MySQLPassword=${{ secrets.MYSQL_PASSWORD }} \
+              AMI=${{ secrets.AMI_ID }} \
+            --capabilities CAPABILITY_NAMED_IAM
+
+      - name: Output Microservices Stack Info
+        run: |
+          aws cloudformation describe-stacks \
+            --stack-name microservices-stack \
+            --query 'Stacks[].Outputs[]' \
+            --output table

@@ -1,0 +1,52 @@
+# name: Deploy Infrastructure
+
+# on:
+#   push:
+#     branches:
+#       - main
+#
+# env:
+#   AWS_REGION: ap-south-1
+#
+# jobs:
+#   deploy-infrastructure:
+#     runs-on: ubuntu-latest
+#     steps:
+#       - name: Checkout code
+#         uses: actions/checkout@v2
+#
+#       - name: Configure AWS credentials
+#         uses: aws-actions/configure-aws-credentials@v1
+#         with:
+#           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+#           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+#           aws-region: ${{ env.AWS_REGION }}
+#
+#       - name: Deploy Infrastructure Stack
+#         run: |
+#           aws cloudformation deploy \
+#             --template-file cloudformation-template--initial-infra.yaml\
+#             --stack-name infrastructure-stack \
+#             --capabilities CAPABILITY_NAMED_IAM
+#
+#       - name: Output Infrastructure Stack Info
+#         run: |
+#           aws cloudformation describe-stacks \
+#             --stack-name infrastructure-stack \
+#             --query "Stacks[0].Outputs" \
+#             > infrastructure-outputs.json
+#           cat infrastructure-outputs.json
+#
+#       - name: Upload infrastructure outputs to S3
+#         env:
+#           BUCKET_NAME: 'expensetrackerinfra'
+#           INFRA_FILE_NAME: 'infrastructure-outputs.json'
+#         run: |
+#           if ! aws s3api head-bucket --bucket-name "$BUCKET_NAME"; then
+#             aws s3 mb s3://$BUCKET_NAME --region ${{ env.AWS_REGION }}
+#           else
+#             echo "Bucket $BUCKET_NAME already exists"
+#           fi
+#           echo "Uploading Bucket: $BUCKET_NAME"
+#           aws s3 cp ${INFRA_FILE_NAME} s3://${BUCKET_NAME}/infrastructure-outputs.json
+#
